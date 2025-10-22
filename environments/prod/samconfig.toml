@@ -1,0 +1,24 @@
+version = 0.1
+
+# Production Environment - Global Defaults
+# These settings are inherited by all components in prod environment
+
+[default.global.parameters]
+stack_name_prefix = "milaliso"
+region = "us-east-1"
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = true
+tags = "Environment=prod Project=milaliso"
+
+[default.deploy.parameters]
+# Global deployment settings for prod
+parameter_overrides = "Environment=prod"
+
+[prod.deploy.parameters]
+stack_name = "sam-app"
+resolve_s3 = true
+s3_prefix = "sam-app"
+region = "us-east-1"
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "Environment=\"prod\""
+image_repositories = []
