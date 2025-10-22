@@ -1,0 +1,40 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: MilaLiso Sample Component
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, test, prod]
+    Description: Environment name for resource naming
+
+Resources:
+  # Sample Lambda Function
+  SampleFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "milaliso-sample-${Environment}"
+      CodeUri: src/
+      Handler: main.lambda_handler
+      Runtime: python3.9
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+
+Outputs:
+  SampleFunctionName:
+    Description: Sample Lambda function name
+    Value: !Ref SampleFunction
+    Export:
+      Name: !Sub "${AWS::StackName}-SampleFunctionName"
+    
+  SampleFunctionArn:
+    Description: Sample Lambda function ARN
+    Value: !GetAtt SampleFunction.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-SampleFunctionArn"
+    
+  Environment:
+    Description: Environment name
+    Value: !Ref Environment
