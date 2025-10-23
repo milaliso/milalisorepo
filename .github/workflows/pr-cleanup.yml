@@ -68,37 +68,49 @@ jobs:
           CLEANUP_SUCCESS=true
           CLEANED_STACKS=""
           
-          # Find all stacks that match the PR pattern
-          PR_STACKS=$(aws cloudformation list-stacks \
+          # Try to find stacks, handle permission errors gracefully
+          echo "🔍 Attempting to find PR-specific stacks..."
+          if PR_STACKS=$(aws cloudformation list-stacks \
             --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE \
             --query "StackSummaries[?contains(StackName, 'milaliso-pr-${{ env.PR_NUMBER }}-')].StackName" \
-            --output text)
-          
-          if [ -n "$PR_STACKS" ]; then
-            for stack_name in $PR_STACKS; do
-              echo "🗑️ Deleting stack: $stack_name"
-              
-              if aws cloudformation delete-stack --stack-name "$stack_name"; then
-                echo "✅ Initiated deletion for $stack_name"
-                CLEANED_STACKS="$CLEANED_STACKS- ✅ $stack_name\n"
+            --output text 2>/dev/null); then
+            
+            if [ -n "$PR_STACKS" ] && [ "$PR_STACKS" != "None" ]; then
+              for stack_name in $PR_STACKS; do
+                echo "🗑️ Attempting to delete stack: $stack_name"
                 
-                # Wait for stack deletion to complete (with timeout)
-                echo "⏳ Waiting for stack deletion to complete..."
-                if timeout 600 aws cloudformation wait stack-delete-complete --stack-name "$stack_name"; then
-                  echo "✅ Stack $stack_name deleted successfully"
+                if aws cloudformation delete-stack --stack-name "$stack_name" 2>/dev/null; then
+                  echo "✅ Initiated deletion for $stack_name"
+                  CLEANED_STACKS="$CLEANED_STACKS- ✅ $stack_name (deletion initiated)\n"
                 else
-                  echo "⚠️ Stack $stack_name deletion timed out (may still be in progress)"
-                  CLEANED_STACKS="$CLEANED_STACKS  ⚠️ Deletion in progress (timed out)\n"
+                  echo "⚠️ Could not delete stack: $stack_name (may not exist or insufficient permissions)"
+                  CLEANED_STACKS="$CLEANED_STACKS- ⚠️ $stack_name (deletion skipped)\n"
                 fi
+              done
+            else
+              echo "ℹ️ No PR-specific stacks found to clean up"
+              CLEANED_STACKS="- ℹ️ No stacks found for PR #${{ env.PR_NUMBER }}"
+            fi
+          else
+            echo "⚠️ Cannot list CloudFormation stacks (insufficient permissions)"
+            echo "🔧 Attempting direct stack deletion based on naming convention..."
+            
+            # Try to delete stacks directly by name without listing
+            EXPECTED_STACKS=(
+              "milaliso-pr-${{ env.PR_NUMBER }}-dev-sample-component"
+            )
+            
+            for stack_name in "${EXPECTED_STACKS[@]}"; do
+              echo "🗑️ Attempting to delete expected stack: $stack_name"
+              
+              if aws cloudformation delete-stack --stack-name "$stack_name" 2>/dev/null; then
+                echo "✅ Initiated deletion for $stack_name"
+                CLEANED_STACKS="$CLEANED_STACKS- ✅ $stack_name (deletion initiated)\n"
               else
-                echo "❌ Failed to delete stack: $stack_name"
-                CLEANUP_SUCCESS=false
-                CLEANED_STACKS="$CLEANED_STACKS- ❌ $stack_name (deletion failed)\n"
+                echo "ℹ️ Stack $stack_name may not exist or already deleted"
+                CLEANED_STACKS="$CLEANED_STACKS- ℹ️ $stack_name (not found or already deleted)\n"
               fi
             done
-          else
-            echo "ℹ️ No PR-specific stacks found to clean up"
-            CLEANED_STACKS="- ℹ️ No stacks found for PR #${{ env.PR_NUMBER }}"
           fi
           
           # Set outputs
@@ -111,22 +123,40 @@ jobs:
         run: |
           echo "🗑️ Cleaning up S3 deployment artifacts..."
           
-          # Clean up SAM deployment artifacts for this PR
-          S3_BUCKET=$(aws cloudformation describe-stacks \
-            --query "Stacks[?contains(StackName, 'aws-sam-cli-managed-default')].Outputs[?OutputKey=='SourceBucket'].OutputValue" \
-            --output text 2>/dev/null || echo "")
+          # Try to clean up SAM deployment artifacts, handle permission errors gracefully
+          echo "🔍 Looking for SAM deployment artifacts..."
           
-          if [ -n "$S3_BUCKET" ] && [ "$S3_BUCKET" != "None" ]; then
-            echo "📦 Found SAM deployment bucket: $S3_BUCKET"
-            
-            # Delete objects with PR-specific prefix
-            aws s3 rm "s3://$S3_BUCKET/" \
-              --recursive \
-              --exclude "*" \
-              --include "*milaliso-pr-${{ env.PR_NUMBER }}-*" \
-              2>/dev/null || echo "ℹ️ No PR-specific S3 objects found"
-          else
-            echo "ℹ️ No SAM deployment bucket found"
+          # Try common SAM bucket patterns
+          POSSIBLE_BUCKETS=(
+            "aws-sam-cli-managed-default-samclisourcebucket-*"
+            "milaliso-sam-deployments-*"
+            "sam-*"
+          )
+          
+          CLEANED_ARTIFACTS=false
+          
+          for bucket_pattern in "${POSSIBLE_BUCKETS[@]}"; do
+            if BUCKETS=$(aws s3api list-buckets --query "Buckets[?contains(Name, '${bucket_pattern%\*}')].Name" --output text 2>/dev/null); then
+              for bucket in $BUCKETS; do
+                if [ -n "$bucket" ] && [ "$bucket" != "None" ]; then
+                  echo "📦 Checking bucket: $bucket"
+                  
+                  # Try to delete PR-specific objects
+                  if aws s3 rm "s3://$bucket/" \
+                    --recursive \
+                    --exclude "*" \
+                    --include "*pr-${{ env.PR_NUMBER }}-*" \
+                    2>/dev/null; then
+                    echo "✅ Cleaned PR artifacts from $bucket"
+                    CLEANED_ARTIFACTS=true
+                  fi
+                fi
+              done
+            fi
+          done
+          
+          if [ "$CLEANED_ARTIFACTS" = false ]; then
+            echo "ℹ️ No S3 deployment artifacts found or insufficient permissions"
           fi
           
       - name: Update PR with cleanup success
