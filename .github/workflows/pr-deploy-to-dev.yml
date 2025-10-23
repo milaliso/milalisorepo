@@ -1,0 +1,234 @@
+name: Deploy PR to Dev Environment
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+  id-token: write
+
+env:
+  AWS_REGION: us-east-1
+  SAM_CLI_TELEMETRY: 0
+
+jobs:
+  deploy-pr-to-dev:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+          
+      - name: Install SAM CLI
+        uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+          
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          
+      - name: Set PR environment variables
+        run: |
+          echo "PR_NUMBER=${{ github.event.number }}" >> $GITHUB_ENV
+          echo "PR_STACK_NAME=milaliso-pr-${{ github.event.number }}-dev" >> $GITHUB_ENV
+          echo "PR_BRANCH_NAME=${{ github.head_ref }}" >> $GITHUB_ENV
+          
+      - name: Update PR with deployment start
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `🚀 **Deployment Started**
+              
+              Deploying PR #${{ env.PR_NUMBER }} to dev environment...
+              
+              - **Stack Name**: \`${{ env.PR_STACK_NAME }}\`
+              - **Branch**: \`${{ env.PR_BRANCH_NAME }}\`
+              - **Status**: 🔄 In Progress
+              
+              [View deployment logs](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`
+            });
+            
+      - name: Deploy components to dev environment
+        id: deploy
+        run: |
+          echo "🚀 Deploying components to PR-specific dev environment..."
+          
+          # Track deployment status
+          DEPLOYMENT_SUCCESS=true
+          DEPLOYED_COMPONENTS=""
+          DEPLOYMENT_URLS=""
+          
+          # Deploy each component that has a template
+          for component_dir in components/*/; do
+            component_name=$(basename "$component_dir")
+            
+            if [ -f "$component_dir/template.yaml" ]; then
+              echo "📦 Deploying component: $component_name"
+              
+              cd "$component_dir"
+              
+              # Build the component
+              if sam build; then
+                echo "✅ Build successful for $component_name"
+                
+                # Deploy with PR-specific stack name
+                COMPONENT_STACK_NAME="${{ env.PR_STACK_NAME }}-${component_name}"
+                
+                if sam deploy \
+                  --config-env dev \
+                  --config-file ../../environments/dev/samconfig.toml \
+                  --stack-name "$COMPONENT_STACK_NAME" \
+                  --parameter-overrides Environment=pr-${{ env.PR_NUMBER }} \
+                  --no-confirm-changeset \
+                  --no-fail-on-empty-changeset; then
+                  
+                  echo "✅ Deployment successful for $component_name"
+                  DEPLOYED_COMPONENTS="$DEPLOYED_COMPONENTS- ✅ $component_name\n"
+                  
+                  # Get stack outputs for URLs
+                  STACK_OUTPUTS=$(aws cloudformation describe-stacks \
+                    --stack-name "$COMPONENT_STACK_NAME" \
+                    --query 'Stacks[0].Outputs' \
+                    --output json 2>/dev/null || echo "[]")
+                  
+                  if [ "$STACK_OUTPUTS" != "[]" ]; then
+                    DEPLOYMENT_URLS="$DEPLOYMENT_URLS\n**$component_name Outputs:**\n"
+                    echo "$STACK_OUTPUTS" | jq -r '.[] | "- **\(.OutputKey)**: \(.OutputValue)"' >> /tmp/outputs.txt
+                    DEPLOYMENT_URLS="$DEPLOYMENT_URLS$(cat /tmp/outputs.txt)\n"
+                  fi
+                  
+                else
+                  echo "❌ Deployment failed for $component_name"
+                  DEPLOYMENT_SUCCESS=false
+                  DEPLOYED_COMPONENTS="$DEPLOYED_COMPONENTS- ❌ $component_name (deployment failed)\n"
+                fi
+              else
+                echo "❌ Build failed for $component_name"
+                DEPLOYMENT_SUCCESS=false
+                DEPLOYED_COMPONENTS="$DEPLOYED_COMPONENTS- ❌ $component_name (build failed)\n"
+              fi
+              
+              cd - > /dev/null
+            else
+              echo "⏭️ Skipping $component_name (no template.yaml)"
+            fi
+          done
+          
+          # Set outputs for next steps
+          echo "deployment_success=$DEPLOYMENT_SUCCESS" >> $GITHUB_OUTPUT
+          echo "deployed_components<<EOF" >> $GITHUB_OUTPUT
+          echo -e "$DEPLOYED_COMPONENTS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          echo "deployment_urls<<EOF" >> $GITHUB_OUTPUT
+          echo -e "$DEPLOYMENT_URLS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          
+      - name: Update PR with deployment success
+        if: steps.deploy.outputs.deployment_success == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const deployedComponents = `${{ steps.deploy.outputs.deployed_components }}`;
+            const deploymentUrls = `${{ steps.deploy.outputs.deployment_urls }}`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `✅ **Deployment Successful**
+              
+              PR #${{ env.PR_NUMBER }} has been deployed to dev environment!
+              
+              ## 📦 Deployed Components
+              ${deployedComponents}
+              
+              ## 🔗 Environment Details
+              - **Stack Name**: \`${{ env.PR_STACK_NAME }}\`
+              - **Environment**: \`pr-${{ env.PR_NUMBER }}\`
+              - **AWS Region**: \`${{ env.AWS_REGION }}\`
+              
+              ${deploymentUrls}
+              
+              ## 🧪 Testing
+              You can now test your changes in the dedicated PR environment.
+              
+              [View deployment logs](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`
+            });
+            
+            // Create deployment status
+            github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: context.payload.deployment?.id || 0,
+              state: 'success',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              description: 'PR deployed to dev environment'
+            });
+            
+      - name: Update PR with deployment failure
+        if: steps.deploy.outputs.deployment_success == 'false'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const deployedComponents = `${{ steps.deploy.outputs.deployed_components }}`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `❌ **Deployment Failed**
+              
+              PR #${{ env.PR_NUMBER }} deployment to dev environment failed.
+              
+              ## 📦 Component Status
+              ${deployedComponents}
+              
+              ## 🔍 Troubleshooting
+              - Check the [deployment logs](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
+              - Verify SAM templates are valid
+              - Check AWS permissions and quotas
+              
+              Please fix the issues and push new commits to retry deployment.`
+            });
+            
+            // Create failed deployment status
+            github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: context.payload.deployment?.id || 0,
+              state: 'failure',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              description: 'PR deployment to dev environment failed'
+            });
+            
+      - name: Update commit status
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const success = '${{ steps.deploy.outputs.deployment_success }}' === 'true';
+            
+            github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: success ? 'success' : 'failure',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              description: success ? 'PR deployed to dev environment' : 'PR deployment failed',
+              context: 'pr-deployment/dev'
+            });

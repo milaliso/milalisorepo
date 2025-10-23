@@ -1,0 +1,137 @@
+# Auto-labeler Configuration
+# Automatically applies labels to PRs based on file changes
+
+# Backend/Infrastructure Changes
+backend:
+  - changed-files:
+    - any-glob-to-any-file: 
+      - 'components/**/*.py'
+      - 'components/**/*.yaml'
+      - 'components/**/*.yml'
+      - 'components/**/template.yaml'
+      - 'components/**/samconfig.toml'
+      - 'environments/**/*.toml'
+
+# Scripts and Automation
+scripts:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'scripts/**/*.sh'
+      - 'scripts/**/*.py'
+      - '.github/workflows/**/*.yml'
+      - '.github/workflows/**/*.yaml'
+
+# Documentation Changes  
+documentation:
+  - changed-files:
+    - any-glob-to-any-file:
+      - '**/*.md'
+      - 'docs/**/*'
+      - '.github/PULL_REQUEST_TEMPLATE.md'
+      - '.github/ISSUE_TEMPLATE/**/*'
+
+# Configuration Changes
+configuration:
+  - changed-files:
+    - any-glob-to-any-file:
+      - '*.toml'
+      - '*.yaml'
+      - '*.yml'
+      - '.github/**/*.yml'
+      - '.github/**/*.yaml'
+      - 'environments/**/*.toml'
+      - '.gitignore'
+      - '.env*'
+
+# CI/CD Pipeline Changes
+cicd:
+  - changed-files:
+    - any-glob-to-any-file:
+      - '.github/workflows/**/*'
+      - 'scripts/deploy-*'
+      - 'scripts/setup-*'
+      - '**/samconfig.toml'
+
+# Security Related Changes
+security:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'scripts/setup-branch-protection.sh'
+      - '.github/CODEOWNERS'
+      - '**/security/**/*'
+      - '**/*security*'
+      - '**/*auth*'
+
+# Testing Changes
+testing:
+  - changed-files:
+    - any-glob-to-any-file:
+      - '**/tests/**/*'
+      - '**/test_*.py'
+      - '**/*_test.py'
+      - '**/pytest.ini'
+      - '**/conftest.py'
+
+# Component Specific Labels
+sample-component:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'components/sample-component/**/*'
+
+# Environment Specific
+dev-environment:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'environments/dev/**/*'
+      - '**/samconfig.toml'
+
+test-environment:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'environments/test/**/*'
+
+prod-environment:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'environments/prod/**/*'
+
+# Size-based Labels (approximate)
+small:
+  - changed-files:
+    - any-glob-to-any-file: '*'
+    - count: '<=10'
+
+medium:
+  - changed-files:
+    - any-glob-to-any-file: '*'
+    - count: '11-50'
+
+large:
+  - changed-files:
+    - any-glob-to-any-file: '*'
+    - count: '>50'
+
+# Priority Labels
+hotfix:
+  - head-branch: ['hotfix/**', 'hotfix/*']
+
+feature:
+  - head-branch: ['feature/**', 'feature/*']
+
+bugfix:
+  - head-branch: ['bugfix/**', 'bugfix/*', 'fix/**', 'fix/*']
+
+docs:
+  - head-branch: ['docs/**', 'docs/*', 'documentation/**']
+
+# Dependencies
+dependencies:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'requirements.txt'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'Pipfile'
+      - 'Pipfile.lock'
+      - 'poetry.lock'
+      - 'pyproject.toml'

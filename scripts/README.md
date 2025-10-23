@@ -17,7 +17,7 @@ The scripts in this directory are designed to automate common development and de
 **What it does:**
 - Blocks direct pushes to main branch
 - Requires pull requests for all changes  
-- Requires at least 1 approval before merge
+- Solo development mode (0 approvals required)
 - Enforces up-to-date branches before merge
 - Applies rules to administrators
 - Dismisses stale reviews on new commits
@@ -27,14 +27,162 @@ The scripts in this directory are designed to automate common development and de
 ./scripts/setup-branch-protection.sh
 ```
 
+### 🔄 `setup-pr-workflow.sh`
+
+**Purpose:** Configure complete PR workflow automation system  
+**Story:** SCRUM-439 - PR Approval Workflow  
+**Status:** ✅ Complete  
+
+**What it does:**
+- Creates PR template with comprehensive checklist
+- Configures auto-labeling based on file changes
+- Sets up CODEOWNERS for automatic reviewer assignment
+- Creates GitHub Actions for PR validation and deployment
+- Integrates with branch protection rules
+- Enables PR-specific dev environments with auto-cleanup
+
+**Usage:**
+```bash
+./scripts/setup-pr-workflow.sh
+```
+
+### 🛠️ `manage-pr-environment.sh`
+
+**Purpose:** Manual management of PR-specific dev environments  
+**Story:** SCRUM-439 - PR Approval Workflow  
+**Status:** ✅ Complete  
+
+**What it does:**
+- Deploy PR to dev environment manually
+- Check PR environment status and outputs
+- Clean up PR environment resources
+- List all active PR environments
+
+**Usage:**
+```bash
+# Deploy PR to dev environment
+./scripts/manage-pr-environment.sh deploy <pr-number>
+
+# Check PR environment status
+./scripts/manage-pr-environment.sh status <pr-number>
+
+# Clean up PR environment
+./scripts/manage-pr-environment.sh cleanup <pr-number>
+
+# List all PR environments
+./scripts/manage-pr-environment.sh list
+```
+
+**Examples:**
+```bash
+./scripts/manage-pr-environment.sh deploy 42
+./scripts/manage-pr-environment.sh status 42
+./scripts/manage-pr-environment.sh cleanup 42
+./scripts/manage-pr-environment.sh list
+```
+
 **Prerequisites:**
+- AWS CLI configured with appropriate credentials
+- SAM CLI installed
 - GitHub CLI (`gh`) installed and authenticated
 - Repository must be public or have GitHub Pro subscription
 - User must have admin access to the repository
 
 **Exit Codes:**
-- `0` - Success: Branch protection rules applied
-- `1` - Error: Missing prerequisites or authentication
+- `0` - Success: Operation completed successfully
+- `1` - Error: Missing prerequisites or operation failed
+
+## 🔄 PR Workflow System
+
+The MilaLiso repository uses an automated PR workflow system that provides:
+- **Automated PR deployment** to isolated dev environments
+- **Status checks** and validation before merge
+- **Auto-labeling** and reviewer assignment
+- **Automatic cleanup** of resources
+
+### Complete PR Workflow
+
+#### 1. **Development Phase**
+```bash
+# Create feature branch
+git checkout -b feature/your-feature-name
+
+# Make your changes
+# ... develop your feature ...
+
+# Test locally (optional)
+./scripts/manage-pr-environment.sh deploy 999  # Use 999 for local testing
+./scripts/manage-pr-environment.sh cleanup 999  # Clean up when done
+```
+
+#### 2. **PR Creation**
+```bash
+# Push your branch
+git push origin feature/your-feature-name
+
+# Create PR (auto-populates with template)
+gh pr create --fill
+
+# Or create via GitHub web UI
+```
+
+#### 3. **Automated PR Processing**
+When PR is created, GitHub Actions automatically:
+- ✅ **Validates** SAM templates and builds components
+- ✅ **Deploys** to PR-specific dev environment (`milaliso-pr-N-dev`)
+- ✅ **Labels** PR based on changed files
+- ✅ **Assigns** reviewers based on CODEOWNERS
+- ✅ **Reports** deployment status in PR comments
+
+#### 4. **Testing Phase**
+- ✅ **Test** your changes in the deployed PR environment
+- ✅ **Review** deployment logs and status checks
+- ✅ **Iterate** by pushing new commits (triggers redeployment)
+
+#### 5. **Merge Phase**
+- ✅ **Status checks** must pass (validation + deployment)
+- ✅ **Merge** when ready (no approval required for solo dev)
+- ✅ **Automatic cleanup** of PR environment after merge
+
+### PR Environment Naming
+
+Each PR gets its own isolated environment:
+- **Stack Names**: `milaliso-pr-{number}-dev-{component}`
+- **Environment Variable**: `pr-{number}`
+- **Examples**:
+  - PR #1: `milaliso-pr-1-dev-sample-component`
+  - PR #42: `milaliso-pr-42-dev-sample-component`
+
+### Status Checks
+
+The following status checks must pass before merge:
+- **`pr-validation`**: SAM template validation and component builds
+- **`pr-deployment/dev`**: Successful deployment to PR environment
+
+### Auto-Labeling
+
+PRs are automatically labeled based on changed files:
+- **`backend`**: Python, SAM templates, infrastructure
+- **`scripts`**: Shell scripts, automation
+- **`documentation`**: Markdown files, docs
+- **`configuration`**: Config files, TOML, YAML
+- **`cicd`**: GitHub Actions, workflows
+- **`feature`/`bugfix`/`hotfix`**: Based on branch name
+- **`small`/`medium`/`large`**: Based on number of files changed
+
+### Manual Override
+
+For emergency situations or debugging:
+```bash
+# Deploy specific PR manually
+./scripts/manage-pr-environment.sh deploy 42
+
+# Check what's deployed
+./scripts/manage-pr-environment.sh status 42
+
+# Force cleanup if needed
+./scripts/manage-pr-environment.sh cleanup 42
+```
 
 ## Prerequisites
 
