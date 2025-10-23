@@ -45,23 +45,38 @@ jobs:
           echo "PR_NUMBER=${{ github.event.number }}" >> $GITHUB_ENV
           echo "PR_STACK_NAME=milaliso-pr-${{ github.event.number }}-dev" >> $GITHUB_ENV
           echo "PR_BRANCH_NAME=${{ github.head_ref }}" >> $GITHUB_ENV
-          echo "S3_BUCKET=milaliso-sam-deployments-${{ env.AWS_REGION }}" >> $GITHUB_ENV
           
-      - name: Ensure S3 bucket exists
+      - name: Find available S3 bucket
         run: |
-          # Check if bucket exists, create if it doesn't
-          if ! aws s3api head-bucket --bucket "$S3_BUCKET" 2>/dev/null; then
-            echo "Creating S3 bucket: $S3_BUCKET"
-            aws s3 mb s3://$S3_BUCKET --region ${{ env.AWS_REGION }}
+          echo "🔍 Looking for available S3 buckets..."
+          
+          # List available buckets
+          AVAILABLE_BUCKETS=$(aws s3api list-buckets --query 'Buckets[].Name' --output text 2>/dev/null || echo "")
+          
+          if [ -n "$AVAILABLE_BUCKETS" ]; then
+            echo "Available buckets:"
+            echo "$AVAILABLE_BUCKETS" | tr '\t' '\n'
             
-            # Enable versioning for better artifact management
-            aws s3api put-bucket-versioning \
-              --bucket "$S3_BUCKET" \
-              --versioning-configuration Status=Enabled
-              
-            echo "✅ S3 bucket created successfully"
+            # Try to find a suitable bucket or use the first available one
+            DEPLOYMENT_BUCKET=""
+            for bucket in $AVAILABLE_BUCKETS; do
+              if [[ "$bucket" == *"sam"* ]] || [[ "$bucket" == *"deploy"* ]] || [[ "$bucket" == *"artifact"* ]]; then
+                DEPLOYMENT_BUCKET="$bucket"
+                break
+              fi
+            done
+            
+            # If no deployment-specific bucket found, use the first available
+            if [ -z "$DEPLOYMENT_BUCKET" ]; then
+              DEPLOYMENT_BUCKET=$(echo "$AVAILABLE_BUCKETS" | head -n1)
+            fi
+            
+            echo "Using deployment bucket: $DEPLOYMENT_BUCKET"
+            echo "S3_BUCKET=$DEPLOYMENT_BUCKET" >> $GITHUB_ENV
           else
-            echo "✅ S3 bucket already exists: $S3_BUCKET"
+            echo "❌ No accessible S3 buckets found"
+            echo "Please ensure at least one S3 bucket exists and is accessible to the GitHub Actions role"
+            exit 1
           fi
           
       - name: Update PR with deployment start
