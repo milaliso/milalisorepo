@@ -95,21 +95,8 @@ prod-environment:
     - any-glob-to-any-file:
       - 'environments/prod/**/*'
 
-# Size-based Labels (approximate)
-small:
-  - changed-files:
-    - any-glob-to-any-file: '*'
-    - count: '<=10'
-
-medium:
-  - changed-files:
-    - any-glob-to-any-file: '*'
-    - count: '11-50'
-
-large:
-  - changed-files:
-    - any-glob-to-any-file: '*'
-    - count: '>50'
+# Size-based Labels (removed - not supported by labeler v5)
+# Note: Size-based labeling requires custom logic in workflow
 
 # Priority Labels
 hotfix:
