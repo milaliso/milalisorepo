@@ -4,7 +4,7 @@ import os
 def hello_world():
     """Simple method that returns hello world message"""
     environment = os.environ.get('ENVIRONMENT', 'unknown')
-    return f"Hello World from {environment} environment! 🚀 AWS integration working!"
+    return f"Hello World from {environment} environment! 🚀 Deployment fix applied and working!"
 
 def lambda_handler(event, context):
     """

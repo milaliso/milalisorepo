@@ -24,18 +24,17 @@ environments/ @milaliso
 # === COMPONENTS ===
 
 # All components require both owners
-components/ @milaliso @vhutali
+components/ @milaliso
 
 # Sample Component (Template for all components)
-components/sample-component/ @milaliso @vhutali
+components/sample-component/ @milaliso
 
 # Test Component (milaliso only)
 components/test-component/ @milaliso
 
 # Future components can be added here as they're created
-# components/user-service/ @milaliso @vhutali @backend-team
-# components/payment-service/ @milaliso @vhutali @backend-team @security-team
-# components/notification-service/ @milaliso @vhutali @backend-team
+# components/user-service/ @milaliso @backend-team
+
 
 # === DOCUMENTATION ===
 

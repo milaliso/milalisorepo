@@ -42,22 +42,21 @@ Defined in `samconfig.toml`:
 ### Development Environment
 ```bash
 # From component directory
-sam deploy --config-env dev --config-file ../../environments/dev/samconfig.toml
+sam deploy --config-env dev
 
 # From root directory
 sam deploy --config-env dev \
-  --config-file environments/dev/samconfig.toml \
   --template-file components/sample-component/template.yaml
 ```
 
 ### Test Environment
 ```bash
-sam deploy --config-env test --config-file ../../environments/test/samconfig.toml
+sam deploy --config-env test
 ```
 
 ### Production Environment
 ```bash
-sam deploy --config-env prod --config-file ../../environments/prod/samconfig.toml
+sam deploy --config-env prod
 ```
 
 ## Local Development

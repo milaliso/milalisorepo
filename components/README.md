@@ -33,13 +33,12 @@ Components use **dual-layer configuration**:
 ### From Component Directory
 ```bash
 cd components/your-component
-sam deploy --config-env dev --config-file ../../environments/dev/samconfig.toml
+sam deploy --config-env dev
 ```
 
 ### From Root Directory
 ```bash
 sam deploy --config-env dev \
-  --config-file environments/dev/samconfig.toml \
   --template-file components/your-component/template.yaml
 ```
 

@@ -37,10 +37,10 @@ cd milalisorepo
 ```bash
 # Deploy sample component to dev
 cd components/sample-component
-sam deploy --config-env dev --config-file ../../environments/dev/samconfig.toml
+sam deploy --config-env dev
 
 # Or from root directory
-sam deploy --config-env dev --config-file environments/dev/samconfig.toml --template-file components/sample-component/template.yaml
+sam deploy --config-env dev --template-file components/sample-component/template.yaml
 ```
 
 ### 3. Development Workflow
@@ -53,7 +53,7 @@ sam build
 sam local invoke SampleFunction
 
 # Deploy to dev for testing
-sam deploy --config-env dev --config-file ../../environments/dev/samconfig.toml
+sam deploy --config-env dev
 
 # Commit and push
 git add .

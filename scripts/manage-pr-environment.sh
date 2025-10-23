@@ -105,7 +105,6 @@ deploy_pr() {
             sam build
             sam deploy \
                 --config-env dev \
-                --config-file ../../environments/dev/samconfig.toml \
                 --stack-name "${stack_name}-${component_name}" \
                 --parameter-overrides Environment=pr-${pr_number} \
                 --no-confirm-changeset \

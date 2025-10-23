@@ -93,7 +93,6 @@ jobs:
                 
                 if sam deploy \
                   --config-env dev \
-                  --config-file ../../environments/dev/samconfig.toml \
                   --stack-name "$COMPONENT_STACK_NAME" \
                   --parameter-overrides Environment=pr-${{ env.PR_NUMBER }} \
                   --no-confirm-changeset \
