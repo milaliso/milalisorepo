@@ -107,6 +107,7 @@ deploy_pr() {
                 --config-env dev \
                 --stack-name "${stack_name}-${component_name}" \
                 --parameter-overrides Environment=pr-${pr_number} \
+                --resolve-s3 \
                 --no-confirm-changeset \
                 --no-fail-on-empty-changeset
             
