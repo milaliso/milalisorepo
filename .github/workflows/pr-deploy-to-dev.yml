@@ -172,15 +172,7 @@ jobs:
               [View deployment logs](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`
             });
             
-            // Create deployment status
-            github.rest.repos.createDeploymentStatus({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              deployment_id: context.payload.deployment?.id || 0,
-              state: 'success',
-              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
-              description: 'PR deployed to dev environment'
-            });
+            // Deployment status handled by commit status below
             
       - name: Update PR with deployment failure
         if: steps.deploy.outputs.deployment_success == 'false'
@@ -208,15 +200,7 @@ jobs:
               Please fix the issues and push new commits to retry deployment.`
             });
             
-            // Create failed deployment status
-            github.rest.repos.createDeploymentStatus({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              deployment_id: context.payload.deployment?.id || 0,
-              state: 'failure',
-              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
-              description: 'PR deployment to dev environment failed'
-            });
+            // Deployment status handled by commit status below
             
       - name: Update commit status
         if: always()
