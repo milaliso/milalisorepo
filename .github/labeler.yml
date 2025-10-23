@@ -100,16 +100,16 @@ prod-environment:
 
 # Priority Labels
 hotfix:
-  - head-branch: ['hotfix/**', 'hotfix/*']
+  - head-branch: ['hotfix/*']
 
 feature:
-  - head-branch: ['feature/**', 'feature/*']
+  - head-branch: ['feature/*']
 
 bugfix:
-  - head-branch: ['bugfix/**', 'bugfix/*', 'fix/**', 'fix/*']
+  - head-branch: ['bugfix/*', 'fix/*']
 
 docs:
-  - head-branch: ['docs/**', 'docs/*', 'documentation/**']
+  - head-branch: ['docs/*', 'documentation/*']
 
 # Dependencies
 dependencies:
