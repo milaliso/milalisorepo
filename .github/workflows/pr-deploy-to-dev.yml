@@ -46,38 +46,7 @@ jobs:
           echo "PR_STACK_NAME=milaliso-pr-${{ github.event.number }}-dev" >> $GITHUB_ENV
           echo "PR_BRANCH_NAME=${{ github.head_ref }}" >> $GITHUB_ENV
           
-      - name: Find available S3 bucket
-        run: |
-          echo "🔍 Looking for available S3 buckets..."
-          
-          # List available buckets
-          AVAILABLE_BUCKETS=$(aws s3api list-buckets --query 'Buckets[].Name' --output text 2>/dev/null || echo "")
-          
-          if [ -n "$AVAILABLE_BUCKETS" ]; then
-            echo "Available buckets:"
-            echo "$AVAILABLE_BUCKETS" | tr '\t' '\n'
-            
-            # Try to find a suitable bucket or use the first available one
-            DEPLOYMENT_BUCKET=""
-            for bucket in $AVAILABLE_BUCKETS; do
-              if [[ "$bucket" == *"sam"* ]] || [[ "$bucket" == *"deploy"* ]] || [[ "$bucket" == *"artifact"* ]]; then
-                DEPLOYMENT_BUCKET="$bucket"
-                break
-              fi
-            done
-            
-            # If no deployment-specific bucket found, use the first available
-            if [ -z "$DEPLOYMENT_BUCKET" ]; then
-              DEPLOYMENT_BUCKET=$(echo "$AVAILABLE_BUCKETS" | head -n1)
-            fi
-            
-            echo "Using deployment bucket: $DEPLOYMENT_BUCKET"
-            echo "S3_BUCKET=$DEPLOYMENT_BUCKET" >> $GITHUB_ENV
-          else
-            echo "❌ No accessible S3 buckets found"
-            echo "Please ensure at least one S3 bucket exists and is accessible to the GitHub Actions role"
-            exit 1
-          fi
+
           
       - name: Update PR with deployment start
         uses: actions/github-script@v7
@@ -121,17 +90,23 @@ jobs:
               if sam build; then
                 echo "✅ Build successful for $component_name"
                 
-                # Deploy with PR-specific stack name
+                # Deploy with PR-specific stack name using guided approach
                 COMPONENT_STACK_NAME="${{ env.PR_STACK_NAME }}-${component_name}"
                 
-                if sam deploy \
-                  --config-env dev \
-                  --stack-name "$COMPONENT_STACK_NAME" \
-                  --parameter-overrides Environment=pr-${{ env.PR_NUMBER }} \
-                  --s3-bucket "$S3_BUCKET" \
-                  --s3-prefix "pr-${{ env.PR_NUMBER }}" \
-                  --no-confirm-changeset \
-                  --no-fail-on-empty-changeset; then
+                # Create a temporary samconfig for this deployment
+                cat > samconfig-temp.toml << EOF
+version = 0.1
+[default.deploy.parameters]
+stack_name = "$COMPONENT_STACK_NAME"
+resolve_s3 = true
+region = "${{ env.AWS_REGION }}"
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "Environment=pr-${{ env.PR_NUMBER }}"
+confirm_changeset = false
+fail_on_empty_changeset = false
+EOF
+                
+                if sam deploy --config-file samconfig-temp.toml; then
                   
                   echo "✅ Deployment successful for $component_name"
                   DEPLOYED_COMPONENTS="$DEPLOYED_COMPONENTS- ✅ $component_name\n"
@@ -153,6 +128,9 @@ jobs:
                   DEPLOYMENT_SUCCESS=false
                   DEPLOYED_COMPONENTS="$DEPLOYED_COMPONENTS- ❌ $component_name (deployment failed)\n"
                 fi
+                
+                # Clean up temporary config
+                rm -f samconfig-temp.toml
               else
                 echo "❌ Build failed for $component_name"
                 DEPLOYMENT_SUCCESS=false
