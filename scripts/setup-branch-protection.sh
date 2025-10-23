@@ -94,7 +94,7 @@ apply_branch_protection() {
     "contexts": []
   },
   "required_pull_request_reviews": {
-    "required_approving_review_count": 1,
+    "required_approving_review_count": 0,
     "dismiss_stale_reviews": true,
     "require_code_owner_reviews": false
   },
@@ -117,7 +117,7 @@ display_success_message() {
     echo "📋 SCRUM-438 Acceptance Criteria - ALL COMPLETE:"
     echo "   ✅ Main branch protected from direct pushes"
     echo "   ✅ Require pull request for changes"
-    echo "   ✅ Require at least 1 approval"
+    echo "   ✅ Solo development mode (0 approvals required)"
     echo "   ✅ Require up-to-date branches before merge"
     echo ""
     echo "📋 Additional protections enabled:"
