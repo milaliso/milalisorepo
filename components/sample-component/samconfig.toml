@@ -9,7 +9,7 @@ capabilities = "CAPABILITY_IAM"
 confirm_changeset = false
 
 [default.deploy.parameters]
-resolve_s3 = true
+s3_bucket = "milaliso-sam-deployments-us-east-1"
 s3_prefix = "milaliso-sample"
 region = "us-east-1"
 capabilities = "CAPABILITY_IAM"

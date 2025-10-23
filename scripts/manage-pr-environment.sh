@@ -107,7 +107,8 @@ deploy_pr() {
                 --config-env dev \
                 --stack-name "${stack_name}-${component_name}" \
                 --parameter-overrides Environment=pr-${pr_number} \
-                --resolve-s3 \
+                --s3-bucket "milaliso-sam-deployments-${AWS_REGION}" \
+                --s3-prefix "pr-${pr_number}" \
                 --no-confirm-changeset \
                 --no-fail-on-empty-changeset
             
