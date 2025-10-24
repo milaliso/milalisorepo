@@ -70,7 +70,7 @@ jobs:
       - name: Deploy components to dev environment
         id: deploy
         run: |
-          echo "🚀 Deploying components to PR-specific dev environment..."
+          echo "🚀 Deploying components to PR-specific dev environment (v2)..."
           
           # Track deployment status
           DEPLOYMENT_SUCCESS=true
