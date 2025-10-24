@@ -136,31 +136,40 @@ jobs:
                 # Create a temporary samconfig for this deployment
                 if [ -n "$S3_BUCKET" ]; then
                   # Use explicit S3 bucket
-                  cat > samconfig-temp.toml <<EOF
-                version = 0.1
-                [default.deploy.parameters]
-                stack_name = "$COMPONENT_STACK_NAME"
-                s3_bucket = "$S3_BUCKET"
-                s3_prefix = "pr-${PR_NUMBER}"
-                region = "${AWS_REGION}"
-                capabilities = "CAPABILITY_IAM"
-                parameter_overrides = "Environment=pr-${PR_NUMBER}"
-                confirm_changeset = false
-                fail_on_empty_changeset = false
-                EOF
+                  cat > samconfig-temp.toml << 'SAMCONFIG'
+version = 0.1
+[default.deploy.parameters]
+stack_name = "${COMPONENT_STACK_NAME}"
+s3_bucket = "${S3_BUCKET}"
+s3_prefix = "pr-${PR_NUMBER}"
+region = "${AWS_REGION}"
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "Environment=pr-${PR_NUMBER}"
+confirm_changeset = false
+fail_on_empty_changeset = false
+SAMCONFIG
+                  # Replace variables in the file
+                  sed -i "s/\${COMPONENT_STACK_NAME}/$COMPONENT_STACK_NAME/g" samconfig-temp.toml
+                  sed -i "s/\${S3_BUCKET}/$S3_BUCKET/g" samconfig-temp.toml
+                  sed -i "s/\${PR_NUMBER}/$PR_NUMBER/g" samconfig-temp.toml
+                  sed -i "s/\${AWS_REGION}/$AWS_REGION/g" samconfig-temp.toml
                 else
                   # Fallback to resolve_s3
-                  cat > samconfig-temp.toml <<EOF
-                version = 0.1
-                [default.deploy.parameters]
-                stack_name = "$COMPONENT_STACK_NAME"
-                resolve_s3 = true
-                region = "${AWS_REGION}"
-                capabilities = "CAPABILITY_IAM"
-                parameter_overrides = "Environment=pr-${PR_NUMBER}"
-                confirm_changeset = false
-                fail_on_empty_changeset = false
-                EOF
+                  cat > samconfig-temp.toml << 'SAMCONFIG'
+version = 0.1
+[default.deploy.parameters]
+stack_name = "${COMPONENT_STACK_NAME}"
+resolve_s3 = true
+region = "${AWS_REGION}"
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "Environment=pr-${PR_NUMBER}"
+confirm_changeset = false
+fail_on_empty_changeset = false
+SAMCONFIG
+                  # Replace variables in the file
+                  sed -i "s/\${COMPONENT_STACK_NAME}/$COMPONENT_STACK_NAME/g" samconfig-temp.toml
+                  sed -i "s/\${PR_NUMBER}/$PR_NUMBER/g" samconfig-temp.toml
+                  sed -i "s/\${AWS_REGION}/$AWS_REGION/g" samconfig-temp.toml
                 fi
                 
                 # Deploy with retry logic
