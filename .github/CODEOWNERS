@@ -1,0 +1,128 @@
+# CODEOWNERS - Automatic Reviewer Assignment
+# This file defines who owns different parts of the codebase
+# When a PR touches these files, the specified users/teams are automatically requested for review
+
+# Global Fallback - Repository Owner
+# All files default to repository owner unless more specific rules apply
+* @milaliso
+
+# === CORE INFRASTRUCTURE ===
+
+# Branch Protection and Security
+scripts/setup-branch-protection.sh @milaliso
+.github/CODEOWNERS @milaliso
+
+# CI/CD Workflows and Automation
+.github/workflows/ @milaliso
+scripts/deploy-* @milaliso
+scripts/setup-* @milaliso
+
+# Environment Configurations
+environments/ @milaliso
+**/samconfig.toml @milaliso
+
+# === COMPONENTS ===
+
+# All components require both owners
+components/ @milaliso
+
+# Sample Component (Template for all components)
+components/sample-component/ @milaliso
+
+# Test Component (milaliso only)
+components/test-component/ @milaliso
+
+# Future components can be added here as they're created
+# components/user-service/ @milaliso @backend-team
+
+
+# === DOCUMENTATION ===
+
+# Root documentation
+README.md @milaliso
+docs/ @milaliso
+
+# Component-specific documentation
+components/*/README.md @milaliso
+scripts/README.md @milaliso
+
+# === CONFIGURATION FILES ===
+
+# Root configuration files
+*.toml @milaliso
+*.yaml @milaliso
+*.yml @milaliso
+.gitignore @milaliso
+
+# GitHub configuration
+.github/ @milaliso
+
+# === SECURITY SENSITIVE FILES ===
+
+# Security-related scripts and configurations
+scripts/*security* @milaliso
+scripts/*auth* @milaliso
+**/security/ @milaliso
+
+# === TESTING ===
+
+# Test files and configurations
+**/tests/ @milaliso
+**/*test*.py @milaliso
+**/pytest.ini @milaliso
+**/conftest.py @milaliso
+
+# === DEPLOYMENT AND INFRASTRUCTURE ===
+
+# SAM Templates (Infrastructure as Code)
+**/template.yaml @milaliso
+template.yaml @milaliso
+
+# Deployment scripts
+scripts/*deploy* @milaliso
+
+# === FUTURE TEAM ASSIGNMENTS ===
+# Uncomment and modify these when adding team members
+
+# Backend Team
+# components/**/*.py @milaliso @backend-team
+# **/template.yaml @milaliso @backend-team
+
+# Frontend Team (when frontend is added)
+# components/**/*.js @milaliso @frontend-team
+# components/**/*.ts @milaliso @frontend-team
+# components/**/*.jsx @milaliso @frontend-team
+# components/**/*.tsx @milaliso @frontend-team
+
+# DevOps Team (when team grows)
+# .github/workflows/ @milaliso @devops-team
+# scripts/deploy-* @milaliso @devops-team
+# environments/ @milaliso @devops-team
+
+# Security Team (for security-sensitive changes)
+# scripts/*security* @milaliso @security-team
+# scripts/*auth* @milaliso @security-team
+# **/security/ @milaliso @security-team
+
+# QA Team (for testing-related changes)
+# **/tests/ @milaliso @qa-team
+# **/*test*.py @milaliso @qa-team
+
+# === NOTES ===
+# 
+# How CODEOWNERS works:
+# 1. When a PR is created, GitHub checks which files are changed
+# 2. For each changed file, it finds the most specific matching rule
+# 3. The specified users/teams are automatically requested as reviewers
+# 4. The PR cannot be merged until required reviewers approve
+#
+# Current setup:
+# - All files require @milaliso review (solo development)
+# - Ready to add team members by uncommenting relevant sections
+# - More specific rules override general ones
+#
+# To add team members:
+# 1. Create GitHub teams in your organization
+# 2. Uncomment relevant sections above
+# 3. Replace @milaliso with appropriate team handles
+# 4. Update branch protection rules if needed

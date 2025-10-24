@@ -1,22 +1,35 @@
 version = 0.1
 
 # Sample Component Configuration
-# Inherits from environment-level configs and adds component-specific settings
+
+[default.global.parameters]
+stack_name = "milaliso-sample"
+region = "us-east-1"
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = false
+
+[default.deploy.parameters]
+s3_bucket = "milaliso-sam-deployments-us-east-1"
+s3_prefix = "milaliso-sample"
+region = "us-east-1"
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "Environment=dev"
+image_repositories = []
 
 [dev.deploy.parameters]
-# Component-specific settings for dev (inherits from environments/dev/samconfig.toml)
 stack_name = "milaliso-sample-dev"
 s3_prefix = "milaliso-sample-dev"
-# Inherits: region, capabilities, tags, Environment parameter from env level
+parameter_overrides = "Environment=dev"
+tags = "Environment=dev Project=milaliso"
 
 [test.deploy.parameters]
-# Component-specific settings for test (inherits from environments/test/samconfig.toml)
 stack_name = "milaliso-sample-test"
 s3_prefix = "milaliso-sample-test"
-# Inherits: region, capabilities, tags, Environment parameter from env level
+parameter_overrides = "Environment=test"
+tags = "Environment=test Project=milaliso"
 
 [prod.deploy.parameters]
-# Component-specific settings for prod (inherits from environments/prod/samconfig.toml)
 stack_name = "milaliso-sample-prod"
 s3_prefix = "milaliso-sample-prod"
-# Inherits: region, capabilities, tags, Environment parameter from env level
+parameter_overrides = "Environment=prod"
+tags = "Environment=prod Project=milaliso"

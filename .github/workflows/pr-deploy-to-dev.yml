@@ -1,0 +1,322 @@
+name: Deploy PR to Dev Environment
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+  id-token: write
+  statuses: write
+  deployments: write
+
+env:
+  AWS_REGION: us-east-1
+  SAM_CLI_TELEMETRY: 0
+
+jobs:
+  deploy-pr-to-dev:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+          
+      - name: Install SAM CLI
+        uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+          
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          
+      - name: Set PR environment variables
+        run: |
+          echo "PR_NUMBER=${{ github.event.number }}" >> $GITHUB_ENV
+          echo "PR_STACK_NAME=milaliso-pr-${{ github.event.number }}-dev" >> $GITHUB_ENV
+          echo "PR_BRANCH_NAME=${{ github.head_ref }}" >> $GITHUB_ENV
+          
+
+          
+      - name: Update PR with deployment start
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `🚀 **Deployment Started**
+              
+              Deploying PR #${{ env.PR_NUMBER }} to dev environment...
+              
+              - **Stack Name**: \`${{ env.PR_STACK_NAME }}\`
+              - **Branch**: \`${{ env.PR_BRANCH_NAME }}\`
+              - **Status**: 🔄 In Progress
+              
+              [View deployment logs](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`
+            });
+            
+      - name: Deploy components to dev environment
+        id: deploy
+        run: |
+          echo "🚀 Deploying components to PR-specific dev environment (v2)..."
+          
+          # Track deployment status
+          DEPLOYMENT_SUCCESS=true
+          DEPLOYED_COMPONENTS=""
+          DEPLOYMENT_URLS=""
+          FAILED_COMPONENTS=""
+          
+          # Validate stack name length (AWS limit is 128 chars)
+          if [ ${#PR_STACK_NAME} -gt 100 ]; then
+            echo "❌ Stack name too long: ${PR_STACK_NAME}"
+            echo "deployment_success=false" >> $GITHUB_OUTPUT
+            echo "deployed_components=- ❌ Stack name exceeds AWS limits" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          
+          # Create or verify S3 bucket for deployments
+          S3_BUCKET="milaliso-sam-deployments-${AWS_REGION}"
+          echo "🪣 Ensuring S3 bucket exists: $S3_BUCKET"
+          
+          if ! aws s3api head-bucket --bucket "$S3_BUCKET" 2>/dev/null; then
+            echo "📦 Creating S3 bucket: $S3_BUCKET"
+            if [ "${AWS_REGION}" = "us-east-1" ]; then
+              aws s3api create-bucket --bucket "$S3_BUCKET" || {
+                echo "⚠️ Could not create bucket, will use resolve_s3"
+                S3_BUCKET=""
+              }
+            else
+              aws s3api create-bucket \
+                --bucket "$S3_BUCKET" \
+                --create-bucket-configuration LocationConstraint=${AWS_REGION} || {
+                echo "⚠️ Could not create bucket, will use resolve_s3"
+                S3_BUCKET=""
+              }
+            fi
+          else
+            echo "✅ S3 bucket already exists"
+          fi
+          
+          # Deploy each component that has a template
+          for component_dir in components/*/; do
+            component_name=$(basename "$component_dir")
+            
+            if [ -f "$component_dir/template.yaml" ]; then
+              echo "📦 Deploying component: $component_name"
+              
+              cd "$component_dir"
+              
+              # Validate component stack name length
+              COMPONENT_STACK_NAME="${PR_STACK_NAME}-${component_name}"
+              if [ ${#COMPONENT_STACK_NAME} -gt 128 ]; then
+                echo "❌ Component stack name too long: $COMPONENT_STACK_NAME"
+                DEPLOYMENT_SUCCESS=false
+                DEPLOYED_COMPONENTS="$DEPLOYED_COMPONENTS- ❌ $component_name (stack name too long)\n"
+                FAILED_COMPONENTS="$FAILED_COMPONENTS$component_name "
+                cd - > /dev/null
+                continue
+              fi
+              
+              # Build the component
+              if sam build; then
+                echo "✅ Build successful for $component_name"
+                
+                # Create a temporary samconfig for this deployment
+                if [ -n "$S3_BUCKET" ]; then
+                  # Use explicit S3 bucket
+                  cat > samconfig-temp.toml << EOF
+version = 0.1
+[default.deploy.parameters]
+stack_name = "${COMPONENT_STACK_NAME}"
+s3_bucket = "${S3_BUCKET}"
+s3_prefix = "pr-${PR_NUMBER}"
+region = "${AWS_REGION}"
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "Environment=pr-${PR_NUMBER}"
+confirm_changeset = false
+fail_on_empty_changeset = false
+EOF
+                  # Replace variables in the file
+                  sed -i "s/\${COMPONENT_STACK_NAME}/$COMPONENT_STACK_NAME/g" samconfig-temp.toml
+                  sed -i "s/\${S3_BUCKET}/$S3_BUCKET/g" samconfig-temp.toml
+                  sed -i "s/\${PR_NUMBER}/$PR_NUMBER/g" samconfig-temp.toml
+                  sed -i "s/\${AWS_REGION}/$AWS_REGION/g" samconfig-temp.toml
+                else
+                  # Fallback to resolve_s3
+                  cat > samconfig-temp.toml << EOF
+version = 0.1
+[default.deploy.parameters]
+stack_name = "${COMPONENT_STACK_NAME}"
+resolve_s3 = true
+region = "${AWS_REGION}"
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "Environment=pr-${PR_NUMBER}"
+confirm_changeset = false
+fail_on_empty_changeset = false
+EOF
+                  # Replace variables in the file
+                  sed -i "s/\${COMPONENT_STACK_NAME}/$COMPONENT_STACK_NAME/g" samconfig-temp.toml
+                  sed -i "s/\${PR_NUMBER}/$PR_NUMBER/g" samconfig-temp.toml
+                  sed -i "s/\${AWS_REGION}/$AWS_REGION/g" samconfig-temp.toml
+                fi
+                
+                # Deploy with retry logic
+                DEPLOY_ATTEMPTS=0
+                MAX_ATTEMPTS=2
+                DEPLOY_SUCCESS=false
+                
+                while [ $DEPLOY_ATTEMPTS -lt $MAX_ATTEMPTS ] && [ "$DEPLOY_SUCCESS" = false ]; do
+                  DEPLOY_ATTEMPTS=$((DEPLOY_ATTEMPTS + 1))
+                  echo "🚀 Deployment attempt $DEPLOY_ATTEMPTS for $component_name"
+                  
+                  if sam deploy --config-file samconfig-temp.toml; then
+                    echo "✅ Deployment successful for $component_name"
+                    DEPLOYED_COMPONENTS="$DEPLOYED_COMPONENTS- ✅ $component_name\n"
+                    DEPLOY_SUCCESS=true
+                    
+                    # Get stack outputs for URLs
+                    STACK_OUTPUTS=$(aws cloudformation describe-stacks \
+                      --stack-name "$COMPONENT_STACK_NAME" \
+                      --query 'Stacks[0].Outputs' \
+                      --output json 2>/dev/null || echo "[]")
+                    
+                    if [ "$STACK_OUTPUTS" != "[]" ] && [ "$STACK_OUTPUTS" != "null" ]; then
+                      DEPLOYMENT_URLS="$DEPLOYMENT_URLS\n**$component_name Outputs:**\n"
+                      echo "$STACK_OUTPUTS" | jq -r '.[] | "- **\(.OutputKey)**: \(.OutputValue)"' >> /tmp/outputs-${component_name}.txt 2>/dev/null || echo "- Error parsing outputs" >> /tmp/outputs-${component_name}.txt
+                      DEPLOYMENT_URLS="$DEPLOYMENT_URLS$(cat /tmp/outputs-${component_name}.txt)\n"
+                      rm -f /tmp/outputs-${component_name}.txt
+                    fi
+                  else
+                    echo "❌ Deployment attempt $DEPLOY_ATTEMPTS failed for $component_name"
+                    if [ $DEPLOY_ATTEMPTS -eq $MAX_ATTEMPTS ]; then
+                      echo "❌ All deployment attempts failed for $component_name"
+                      DEPLOYMENT_SUCCESS=false
+                      DEPLOYED_COMPONENTS="$DEPLOYED_COMPONENTS- ❌ $component_name (deployment failed after $MAX_ATTEMPTS attempts)\n"
+                      FAILED_COMPONENTS="$FAILED_COMPONENTS$component_name "
+                    else
+                      echo "⏳ Waiting 30 seconds before retry..."
+                      sleep 30
+                    fi
+                  fi
+                done
+              else
+                echo "❌ Build failed for $component_name"
+                DEPLOYMENT_SUCCESS=false
+                DEPLOYED_COMPONENTS="$DEPLOYED_COMPONENTS- ❌ $component_name (build failed)\n"
+                FAILED_COMPONENTS="$FAILED_COMPONENTS$component_name "
+              fi
+              
+              # Always clean up temporary config (success or failure)
+              rm -f samconfig-temp.toml
+              cd - > /dev/null
+            else
+              echo "⏭️ Skipping $component_name (no template.yaml)"
+            fi
+          done
+          
+          # Summary
+          if [ "$DEPLOYMENT_SUCCESS" = true ]; then
+            echo "🎉 All components deployed successfully!"
+          else
+            echo "⚠️ Some components failed to deploy: $FAILED_COMPONENTS"
+          fi
+          
+          # Set outputs for next steps
+          echo "deployment_success=$DEPLOYMENT_SUCCESS" >> $GITHUB_OUTPUT
+          echo "deployed_components<<EOF" >> $GITHUB_OUTPUT
+          echo -e "$DEPLOYED_COMPONENTS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          echo "deployment_urls<<EOF" >> $GITHUB_OUTPUT
+          echo -e "$DEPLOYMENT_URLS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          
+      - name: Update PR with deployment success
+        if: steps.deploy.outputs.deployment_success == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const deployedComponents = `${{ steps.deploy.outputs.deployed_components }}`;
+            const deploymentUrls = `${{ steps.deploy.outputs.deployment_urls }}`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `✅ **Deployment Successful**
+              
+              PR #${{ env.PR_NUMBER }} has been deployed to dev environment!
+              
+              ## 📦 Deployed Components
+              ${deployedComponents}
+              
+              ## 🔗 Environment Details
+              - **Stack Name**: \`${{ env.PR_STACK_NAME }}\`
+              - **Environment**: \`pr-${{ env.PR_NUMBER }}\`
+              - **AWS Region**: \`${{ env.AWS_REGION }}\`
+              
+              ${deploymentUrls}
+              
+              ## 🧪 Testing
+              You can now test your changes in the dedicated PR environment.
+              
+              [View deployment logs](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`
+            });
+            
+            // Deployment status handled by commit status below
+            
+      - name: Update PR with deployment failure
+        if: steps.deploy.outputs.deployment_success == 'false'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const deployedComponents = `${{ steps.deploy.outputs.deployed_components }}`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `❌ **Deployment Failed**
+              
+              PR #${{ env.PR_NUMBER }} deployment to dev environment failed.
+              
+              ## 📦 Component Status
+              ${deployedComponents}
+              
+              ## 🔍 Troubleshooting
+              - Check the [deployment logs](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
+              - Verify SAM templates are valid
+              - Check AWS permissions and quotas
+              
+              Please fix the issues and push new commits to retry deployment.`
+            });
+            
+            // Deployment status handled by commit status below
+            
+      - name: Update commit status
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const success = '${{ steps.deploy.outputs.deployment_success }}' === 'true';
+            
+            github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: success ? 'success' : 'failure',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              description: success ? 'PR deployed to dev environment' : 'PR deployment failed',
+              context: 'pr-deployment/dev'
+            });

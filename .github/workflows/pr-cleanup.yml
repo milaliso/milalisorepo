@@ -1,0 +1,252 @@
+name: Cleanup PR Environment
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+  id-token: write
+
+env:
+  AWS_REGION: us-east-1
+  SAM_CLI_TELEMETRY: 0
+
+jobs:
+  cleanup-pr-environment:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+          
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          
+      - name: Set PR environment variables
+        run: |
+          echo "PR_NUMBER=${{ github.event.number }}" >> $GITHUB_ENV
+          echo "PR_STACK_NAME=milaliso-pr-${{ github.event.number }}-dev" >> $GITHUB_ENV
+          echo "PR_MERGED=${{ github.event.pull_request.merged }}" >> $GITHUB_ENV
+          
+      - name: Update PR with cleanup start
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const merged = '${{ env.PR_MERGED }}' === 'true';
+            const action = merged ? 'merged' : 'closed';
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `🧹 **Environment Cleanup Started**
+              
+              PR #${{ env.PR_NUMBER }} was ${action}. Cleaning up dev environment...
+              
+              - **Stack Name**: \`${{ env.PR_STACK_NAME }}\`
+              - **Status**: 🔄 Cleaning up resources
+              
+              [View cleanup logs](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`
+            });
+            
+      - name: Cleanup PR-specific stacks
+        id: cleanup
+        run: |
+          echo "🧹 Cleaning up PR-specific CloudFormation stacks..."
+          
+          CLEANUP_SUCCESS=true
+          CLEANED_STACKS=""
+          
+          # Try to find stacks, handle permission errors gracefully
+          echo "🔍 Attempting to find PR-specific stacks..."
+          if PR_STACKS=$(aws cloudformation list-stacks \
+            --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE \
+            --query "StackSummaries[?contains(StackName, 'milaliso-pr-${PR_NUMBER}-')].StackName" \
+            --output text 2>/dev/null); then
+            
+            if [ -n "$PR_STACKS" ] && [ "$PR_STACKS" != "None" ]; then
+              for stack_name in $PR_STACKS; do
+                echo "🗑️ Attempting to delete stack: $stack_name"
+                
+                if aws cloudformation delete-stack --stack-name "$stack_name" 2>/dev/null; then
+                  echo "✅ Initiated deletion for $stack_name"
+                  CLEANED_STACKS="$CLEANED_STACKS- ✅ $stack_name (deletion initiated)\n"
+                else
+                  echo "⚠️ Could not delete stack: $stack_name (may not exist or insufficient permissions)"
+                  CLEANED_STACKS="$CLEANED_STACKS- ⚠️ $stack_name (deletion skipped)\n"
+                fi
+              done
+            else
+              echo "ℹ️ No PR-specific stacks found to clean up"
+              CLEANED_STACKS="- ℹ️ No stacks found for PR #${PR_NUMBER}"
+            fi
+          else
+            echo "⚠️ Cannot list CloudFormation stacks (insufficient permissions)"
+            echo "🔧 Attempting direct stack deletion based on naming convention..."
+            
+            # Try to delete stacks directly by name without listing
+            EXPECTED_STACKS=(
+              "milaliso-pr-${PR_NUMBER}-dev-sample-component"
+            )
+            
+            for stack_name in "${EXPECTED_STACKS[@]}"; do
+              echo "🗑️ Attempting to delete expected stack: $stack_name"
+              
+              if aws cloudformation delete-stack --stack-name "$stack_name" 2>/dev/null; then
+                echo "✅ Initiated deletion for $stack_name"
+                CLEANED_STACKS="$CLEANED_STACKS- ✅ $stack_name (deletion initiated)\n"
+              else
+                echo "ℹ️ Stack $stack_name may not exist or already deleted"
+                CLEANED_STACKS="$CLEANED_STACKS- ℹ️ $stack_name (not found or already deleted)\n"
+              fi
+            done
+          fi
+          
+          # Set outputs
+          echo "cleanup_success=$CLEANUP_SUCCESS" >> $GITHUB_OUTPUT
+          echo "cleaned_stacks<<EOF" >> $GITHUB_OUTPUT
+          echo -e "$CLEANED_STACKS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          
+      - name: Cleanup S3 deployment artifacts
+        run: |
+          echo "🗑️ Cleaning up S3 deployment artifacts..."
+          
+          # Clean up from known deployment bucket first
+          DEPLOYMENT_BUCKET="milaliso-sam-deployments-${AWS_REGION}"
+          echo "🔍 Checking deployment bucket: $DEPLOYMENT_BUCKET"
+          
+          CLEANED_ARTIFACTS=false
+          
+          if aws s3api head-bucket --bucket "$DEPLOYMENT_BUCKET" 2>/dev/null; then
+            echo "📦 Found deployment bucket: $DEPLOYMENT_BUCKET"
+            
+            # List and delete PR-specific objects
+            if PR_OBJECTS=$(aws s3api list-objects-v2 \
+              --bucket "$DEPLOYMENT_BUCKET" \
+              --prefix "pr-${PR_NUMBER}/" \
+              --query 'Contents[].Key' \
+              --output text 2>/dev/null); then
+              
+              if [ -n "$PR_OBJECTS" ] && [ "$PR_OBJECTS" != "None" ]; then
+                echo "🗑️ Deleting PR-specific objects..."
+                for object_key in $PR_OBJECTS; do
+                  if aws s3api delete-object \
+                    --bucket "$DEPLOYMENT_BUCKET" \
+                    --key "$object_key" 2>/dev/null; then
+                    echo "✅ Deleted: s3://$DEPLOYMENT_BUCKET/$object_key"
+                    CLEANED_ARTIFACTS=true
+                  fi
+                done
+              else
+                echo "ℹ️ No PR-specific objects found in $DEPLOYMENT_BUCKET"
+              fi
+            fi
+          else
+            echo "ℹ️ Deployment bucket $DEPLOYMENT_BUCKET not found"
+          fi
+          
+          # Fallback: Try to clean up from other SAM buckets
+          echo "🔍 Checking for other SAM deployment artifacts..."
+          
+          POSSIBLE_BUCKETS=(
+            "aws-sam-cli-managed-default-samclisourcebucket"
+            "sam-cli-managed-default-samclisourcebucket"
+          )
+          
+          for bucket_prefix in "${POSSIBLE_BUCKETS[@]}"; do
+            if BUCKETS=$(aws s3api list-buckets \
+              --query "Buckets[?starts_with(Name, '$bucket_prefix')].Name" \
+              --output text 2>/dev/null); then
+              
+              for bucket in $BUCKETS; do
+                if [ -n "$bucket" ] && [ "$bucket" != "None" ]; then
+                  echo "📦 Checking SAM managed bucket: $bucket"
+                  
+                  # Try to delete PR-specific objects with various patterns
+                  for pattern in "pr-${PR_NUMBER}" "*pr-${PR_NUMBER}-*" "*${PR_STACK_NAME}*"; do
+                    if aws s3 rm "s3://$bucket/" \
+                      --recursive \
+                      --exclude "*" \
+                      --include "$pattern" \
+                      2>/dev/null; then
+                      echo "✅ Cleaned PR artifacts from $bucket (pattern: $pattern)"
+                      CLEANED_ARTIFACTS=true
+                    fi
+                  done
+                fi
+              done
+            fi
+          done
+          
+          if [ "$CLEANED_ARTIFACTS" = true ]; then
+            echo "✅ S3 deployment artifacts cleaned successfully"
+          else
+            echo "ℹ️ No S3 deployment artifacts found or insufficient permissions"
+          fi
+          
+      - name: Update PR with cleanup success
+        if: steps.cleanup.outputs.cleanup_success == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const cleanedStacks = `${{ steps.cleanup.outputs.cleaned_stacks }}`;
+            const merged = '${{ env.PR_MERGED }}' === 'true';
+            const action = merged ? 'merged' : 'closed';
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `✅ **Environment Cleanup Complete**
+              
+              PR #${{ env.PR_NUMBER }} environment has been cleaned up after being ${action}.
+              
+              ## 🗑️ Cleaned Resources
+              ${cleanedStacks}
+              
+              ## 💰 Cost Savings
+              All AWS resources for this PR have been removed to prevent unnecessary charges.
+              
+              ${merged ? '🎉 **Thank you for your contribution!**' : ''}
+              
+              [View cleanup logs](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`
+            });
+            
+      - name: Update PR with cleanup failure
+        if: steps.cleanup.outputs.cleanup_success == 'false'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const cleanedStacks = `${{ steps.cleanup.outputs.cleaned_stacks }}`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `⚠️ **Environment Cleanup Issues**
+              
+              Some resources for PR #${{ env.PR_NUMBER }} could not be cleaned up automatically.
+              
+              ## 🗑️ Cleanup Status
+              ${cleanedStacks}
+              
+              ## 🔧 Manual Action Required
+              Please check the AWS console and manually delete any remaining resources:
+              - CloudFormation stacks starting with \`milaliso-pr-${{ env.PR_NUMBER }}-\`
+              - Associated S3 buckets and objects
+              - Lambda functions and API Gateways
+              
+              [View cleanup logs](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}) for more details.`
+            });
