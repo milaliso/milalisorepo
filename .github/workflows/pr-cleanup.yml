@@ -72,7 +72,7 @@ jobs:
           echo "🔍 Attempting to find PR-specific stacks..."
           if PR_STACKS=$(aws cloudformation list-stacks \
             --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE \
-            --query "StackSummaries[?contains(StackName, 'milaliso-pr-${{ env.PR_NUMBER }}-')].StackName" \
+            --query "StackSummaries[?contains(StackName, 'milaliso-pr-${PR_NUMBER}-')].StackName" \
             --output text 2>/dev/null); then
             
             if [ -n "$PR_STACKS" ] && [ "$PR_STACKS" != "None" ]; then
@@ -89,7 +89,7 @@ jobs:
               done
             else
               echo "ℹ️ No PR-specific stacks found to clean up"
-              CLEANED_STACKS="- ℹ️ No stacks found for PR #${{ env.PR_NUMBER }}"
+              CLEANED_STACKS="- ℹ️ No stacks found for PR #${PR_NUMBER}"
             fi
           else
             echo "⚠️ Cannot list CloudFormation stacks (insufficient permissions)"
@@ -97,7 +97,7 @@ jobs:
             
             # Try to delete stacks directly by name without listing
             EXPECTED_STACKS=(
-              "milaliso-pr-${{ env.PR_NUMBER }}-dev-sample-component"
+              "milaliso-pr-${PR_NUMBER}-dev-sample-component"
             )
             
             for stack_name in "${EXPECTED_STACKS[@]}"; do
@@ -124,7 +124,7 @@ jobs:
           echo "🗑️ Cleaning up S3 deployment artifacts..."
           
           # Clean up from known deployment bucket first
-          DEPLOYMENT_BUCKET="milaliso-sam-deployments-${{ env.AWS_REGION }}"
+          DEPLOYMENT_BUCKET="milaliso-sam-deployments-${AWS_REGION}"
           echo "🔍 Checking deployment bucket: $DEPLOYMENT_BUCKET"
           
           CLEANED_ARTIFACTS=false
@@ -135,7 +135,7 @@ jobs:
             # List and delete PR-specific objects
             if PR_OBJECTS=$(aws s3api list-objects-v2 \
               --bucket "$DEPLOYMENT_BUCKET" \
-              --prefix "pr-${{ env.PR_NUMBER }}/" \
+              --prefix "pr-${PR_NUMBER}/" \
               --query 'Contents[].Key' \
               --output text 2>/dev/null); then
               
@@ -175,7 +175,7 @@ jobs:
                   echo "📦 Checking SAM managed bucket: $bucket"
                   
                   # Try to delete PR-specific objects with various patterns
-                  for pattern in "pr-${{ env.PR_NUMBER }}" "*pr-${{ env.PR_NUMBER }}-*" "*${{ env.PR_STACK_NAME }}*"; do
+                  for pattern in "pr-${PR_NUMBER}" "*pr-${PR_NUMBER}-*" "*${PR_STACK_NAME}*"; do
                     if aws s3 rm "s3://$bucket/" \
                       --recursive \
                       --exclude "*" \

@@ -87,12 +87,12 @@ jobs:
           fi
           
           # Create or verify S3 bucket for deployments
-          S3_BUCKET="milaliso-sam-deployments-${{ env.AWS_REGION }}"
+          S3_BUCKET="milaliso-sam-deployments-${AWS_REGION}"
           echo "🪣 Ensuring S3 bucket exists: $S3_BUCKET"
           
           if ! aws s3api head-bucket --bucket "$S3_BUCKET" 2>/dev/null; then
             echo "📦 Creating S3 bucket: $S3_BUCKET"
-            if [ "${{ env.AWS_REGION }}" = "us-east-1" ]; then
+            if [ "${AWS_REGION}" = "us-east-1" ]; then
               aws s3api create-bucket --bucket "$S3_BUCKET" || {
                 echo "⚠️ Could not create bucket, will use resolve_s3"
                 S3_BUCKET=""
@@ -100,7 +100,7 @@ jobs:
             else
               aws s3api create-bucket \
                 --bucket "$S3_BUCKET" \
-                --create-bucket-configuration LocationConstraint=${{ env.AWS_REGION }} || {
+                --create-bucket-configuration LocationConstraint=${AWS_REGION} || {
                 echo "⚠️ Could not create bucket, will use resolve_s3"
                 S3_BUCKET=""
               }
@@ -119,7 +119,7 @@ jobs:
               cd "$component_dir"
               
               # Validate component stack name length
-              COMPONENT_STACK_NAME="${{ env.PR_STACK_NAME }}-${component_name}"
+              COMPONENT_STACK_NAME="${PR_STACK_NAME}-${component_name}"
               if [ ${#COMPONENT_STACK_NAME} -gt 128 ]; then
                 echo "❌ Component stack name too long: $COMPONENT_STACK_NAME"
                 DEPLOYMENT_SUCCESS=false
@@ -141,10 +141,10 @@ version = 0.1
 [default.deploy.parameters]
 stack_name = "$COMPONENT_STACK_NAME"
 s3_bucket = "$S3_BUCKET"
-s3_prefix = "pr-${{ env.PR_NUMBER }}"
-region = "${{ env.AWS_REGION }}"
+s3_prefix = "pr-${PR_NUMBER}"
+region = "${AWS_REGION}"
 capabilities = "CAPABILITY_IAM"
-parameter_overrides = "Environment=pr-${{ env.PR_NUMBER }}"
+parameter_overrides = "Environment=pr-${PR_NUMBER}"
 confirm_changeset = false
 fail_on_empty_changeset = false
 EOF
@@ -155,9 +155,9 @@ version = 0.1
 [default.deploy.parameters]
 stack_name = "$COMPONENT_STACK_NAME"
 resolve_s3 = true
-region = "${{ env.AWS_REGION }}"
+region = "${AWS_REGION}"
 capabilities = "CAPABILITY_IAM"
-parameter_overrides = "Environment=pr-${{ env.PR_NUMBER }}"
+parameter_overrides = "Environment=pr-${PR_NUMBER}"
 confirm_changeset = false
 fail_on_empty_changeset = false
 EOF
