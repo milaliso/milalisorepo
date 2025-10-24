@@ -136,31 +136,31 @@ jobs:
                 # Create a temporary samconfig for this deployment
                 if [ -n "$S3_BUCKET" ]; then
                   # Use explicit S3 bucket
-                  cat > samconfig-temp.toml << EOF
-version = 0.1
-[default.deploy.parameters]
-stack_name = "$COMPONENT_STACK_NAME"
-s3_bucket = "$S3_BUCKET"
-s3_prefix = "pr-${PR_NUMBER}"
-region = "${AWS_REGION}"
-capabilities = "CAPABILITY_IAM"
-parameter_overrides = "Environment=pr-${PR_NUMBER}"
-confirm_changeset = false
-fail_on_empty_changeset = false
-EOF
+                  cat > samconfig-temp.toml <<EOF
+                version = 0.1
+                [default.deploy.parameters]
+                stack_name = "$COMPONENT_STACK_NAME"
+                s3_bucket = "$S3_BUCKET"
+                s3_prefix = "pr-${PR_NUMBER}"
+                region = "${AWS_REGION}"
+                capabilities = "CAPABILITY_IAM"
+                parameter_overrides = "Environment=pr-${PR_NUMBER}"
+                confirm_changeset = false
+                fail_on_empty_changeset = false
+                EOF
                 else
                   # Fallback to resolve_s3
-                  cat > samconfig-temp.toml << EOF
-version = 0.1
-[default.deploy.parameters]
-stack_name = "$COMPONENT_STACK_NAME"
-resolve_s3 = true
-region = "${AWS_REGION}"
-capabilities = "CAPABILITY_IAM"
-parameter_overrides = "Environment=pr-${PR_NUMBER}"
-confirm_changeset = false
-fail_on_empty_changeset = false
-EOF
+                  cat > samconfig-temp.toml <<EOF
+                version = 0.1
+                [default.deploy.parameters]
+                stack_name = "$COMPONENT_STACK_NAME"
+                resolve_s3 = true
+                region = "${AWS_REGION}"
+                capabilities = "CAPABILITY_IAM"
+                parameter_overrides = "Environment=pr-${PR_NUMBER}"
+                confirm_changeset = false
+                fail_on_empty_changeset = false
+                EOF
                 fi
                 
                 # Deploy with retry logic
