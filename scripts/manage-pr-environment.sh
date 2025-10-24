@@ -92,6 +92,16 @@ deploy_pr() {
     echo "🚀 Deploying PR #${pr_number} to dev environment..."
     echo "Stack name: ${stack_name}"
     
+    # Validate stack name length
+    if [ ${#stack_name} -gt 100 ]; then
+        echo "❌ Stack name too long: ${stack_name}"
+        echo "   Base stack names should be under 100 characters to allow for component suffixes"
+        return 1
+    fi
+    
+    local deployment_success=true
+    local failed_components=""
+    
     # Deploy each component
     for component_dir in components/*/; do
         component_name=$(basename "$component_dir")
@@ -103,21 +113,82 @@ deploy_pr() {
             
             # Build and deploy
             sam build
-            sam deploy \
+            
+            # Validate stack name length
+            component_stack_name="${stack_name}-${component_name}"
+            if [ ${#component_stack_name} -gt 128 ]; then
+                echo "❌ Component stack name too long: $component_stack_name"
+                echo "   AWS CloudFormation stack names must be 128 characters or less"
+                cd - > /dev/null
+                return 1
+            fi
+            
+            # Check if S3 bucket exists, create if needed
+            s3_bucket="milaliso-sam-deployments-${AWS_REGION}"
+            if ! aws s3api head-bucket --bucket "$s3_bucket" 2>/dev/null; then
+                echo "📦 Creating S3 bucket: $s3_bucket"
+                if [ "$AWS_REGION" = "us-east-1" ]; then
+                    aws s3api create-bucket --bucket "$s3_bucket" || {
+                        echo "⚠️ Could not create bucket, using resolve_s3 fallback"
+                        sam deploy \
+                            --config-env dev \
+                            --stack-name "$component_stack_name" \
+                            --parameter-overrides Environment=pr-${pr_number} \
+                            --resolve-s3 \
+                            --no-confirm-changeset \
+                            --no-fail-on-empty-changeset
+                        cd - > /dev/null
+                        return $?
+                    }
+                else
+                    aws s3api create-bucket \
+                        --bucket "$s3_bucket" \
+                        --create-bucket-configuration LocationConstraint=$AWS_REGION || {
+                        echo "⚠️ Could not create bucket, using resolve_s3 fallback"
+                        sam deploy \
+                            --config-env dev \
+                            --stack-name "$component_stack_name" \
+                            --parameter-overrides Environment=pr-${pr_number} \
+                            --resolve-s3 \
+                            --no-confirm-changeset \
+                            --no-fail-on-empty-changeset
+                        cd - > /dev/null
+                        return $?
+                    }
+                fi
+            fi
+            
+            # Deploy with explicit S3 bucket
+            if sam deploy \
                 --config-env dev \
-                --stack-name "${stack_name}-${component_name}" \
+                --stack-name "$component_stack_name" \
                 --parameter-overrides Environment=pr-${pr_number} \
-                --s3-bucket "milaliso-sam-deployments-${AWS_REGION}" \
+                --s3-bucket "$s3_bucket" \
                 --s3-prefix "pr-${pr_number}" \
                 --no-confirm-changeset \
-                --no-fail-on-empty-changeset
+                --no-fail-on-empty-changeset; then
+                echo "✅ Deployed $component_name"
+            else
+                echo "❌ Failed to deploy $component_name"
+                deployment_success=false
+                failed_components="$failed_components $component_name"
+            fi
             
             cd - > /dev/null
-            echo "✅ Deployed $component_name"
+        else
+            echo "⏭️ Skipping $component_name (no template.yaml)"
         fi
     done
     
-    echo "✅ PR #${pr_number} deployed successfully!"
+    # Summary
+    if [ "$deployment_success" = true ]; then
+        echo "✅ PR #${pr_number} deployed successfully!"
+        return 0
+    else
+        echo "❌ PR #${pr_number} deployment completed with failures"
+        echo "   Failed components:$failed_components"
+        return 1
+    fi
 }
 
 #===============================================================================

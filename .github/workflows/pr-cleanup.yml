@@ -123,39 +123,76 @@ jobs:
         run: |
           echo "🗑️ Cleaning up S3 deployment artifacts..."
           
-          # Try to clean up SAM deployment artifacts, handle permission errors gracefully
-          echo "🔍 Looking for SAM deployment artifacts..."
-          
-          # Try common SAM bucket patterns
-          POSSIBLE_BUCKETS=(
-            "aws-sam-cli-managed-default-samclisourcebucket-*"
-            "milaliso-sam-deployments-*"
-            "sam-*"
-          )
+          # Clean up from known deployment bucket first
+          DEPLOYMENT_BUCKET="milaliso-sam-deployments-${{ env.AWS_REGION }}"
+          echo "🔍 Checking deployment bucket: $DEPLOYMENT_BUCKET"
           
           CLEANED_ARTIFACTS=false
           
-          for bucket_pattern in "${POSSIBLE_BUCKETS[@]}"; do
-            if BUCKETS=$(aws s3api list-buckets --query "Buckets[?contains(Name, '${bucket_pattern%\*}')].Name" --output text 2>/dev/null); then
-              for bucket in $BUCKETS; do
-                if [ -n "$bucket" ] && [ "$bucket" != "None" ]; then
-                  echo "📦 Checking bucket: $bucket"
-                  
-                  # Try to delete PR-specific objects
-                  if aws s3 rm "s3://$bucket/" \
-                    --recursive \
-                    --exclude "*" \
-                    --include "*pr-${{ env.PR_NUMBER }}-*" \
-                    2>/dev/null; then
-                    echo "✅ Cleaned PR artifacts from $bucket"
+          if aws s3api head-bucket --bucket "$DEPLOYMENT_BUCKET" 2>/dev/null; then
+            echo "📦 Found deployment bucket: $DEPLOYMENT_BUCKET"
+            
+            # List and delete PR-specific objects
+            if PR_OBJECTS=$(aws s3api list-objects-v2 \
+              --bucket "$DEPLOYMENT_BUCKET" \
+              --prefix "pr-${{ env.PR_NUMBER }}/" \
+              --query 'Contents[].Key' \
+              --output text 2>/dev/null); then
+              
+              if [ -n "$PR_OBJECTS" ] && [ "$PR_OBJECTS" != "None" ]; then
+                echo "🗑️ Deleting PR-specific objects..."
+                for object_key in $PR_OBJECTS; do
+                  if aws s3api delete-object \
+                    --bucket "$DEPLOYMENT_BUCKET" \
+                    --key "$object_key" 2>/dev/null; then
+                    echo "✅ Deleted: s3://$DEPLOYMENT_BUCKET/$object_key"
                     CLEANED_ARTIFACTS=true
                   fi
+                done
+              else
+                echo "ℹ️ No PR-specific objects found in $DEPLOYMENT_BUCKET"
+              fi
+            fi
+          else
+            echo "ℹ️ Deployment bucket $DEPLOYMENT_BUCKET not found"
+          fi
+          
+          # Fallback: Try to clean up from other SAM buckets
+          echo "🔍 Checking for other SAM deployment artifacts..."
+          
+          POSSIBLE_BUCKETS=(
+            "aws-sam-cli-managed-default-samclisourcebucket"
+            "sam-cli-managed-default-samclisourcebucket"
+          )
+          
+          for bucket_prefix in "${POSSIBLE_BUCKETS[@]}"; do
+            if BUCKETS=$(aws s3api list-buckets \
+              --query "Buckets[?starts_with(Name, '$bucket_prefix')].Name" \
+              --output text 2>/dev/null); then
+              
+              for bucket in $BUCKETS; do
+                if [ -n "$bucket" ] && [ "$bucket" != "None" ]; then
+                  echo "📦 Checking SAM managed bucket: $bucket"
+                  
+                  # Try to delete PR-specific objects with various patterns
+                  for pattern in "pr-${{ env.PR_NUMBER }}" "*pr-${{ env.PR_NUMBER }}-*" "*${{ env.PR_STACK_NAME }}*"; do
+                    if aws s3 rm "s3://$bucket/" \
+                      --recursive \
+                      --exclude "*" \
+                      --include "$pattern" \
+                      2>/dev/null; then
+                      echo "✅ Cleaned PR artifacts from $bucket (pattern: $pattern)"
+                      CLEANED_ARTIFACTS=true
+                    fi
+                  done
                 fi
               done
             fi
           done
           
-          if [ "$CLEANED_ARTIFACTS" = false ]; then
+          if [ "$CLEANED_ARTIFACTS" = true ]; then
+            echo "✅ S3 deployment artifacts cleaned successfully"
+          else
             echo "ℹ️ No S3 deployment artifacts found or insufficient permissions"
           fi
           

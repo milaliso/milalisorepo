@@ -76,6 +76,38 @@ jobs:
           DEPLOYMENT_SUCCESS=true
           DEPLOYED_COMPONENTS=""
           DEPLOYMENT_URLS=""
+          FAILED_COMPONENTS=""
+          
+          # Validate stack name length (AWS limit is 128 chars)
+          if [ ${#PR_STACK_NAME} -gt 100 ]; then
+            echo "❌ Stack name too long: ${PR_STACK_NAME}"
+            echo "deployment_success=false" >> $GITHUB_OUTPUT
+            echo "deployed_components=- ❌ Stack name exceeds AWS limits" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          
+          # Create or verify S3 bucket for deployments
+          S3_BUCKET="milaliso-sam-deployments-${{ env.AWS_REGION }}"
+          echo "🪣 Ensuring S3 bucket exists: $S3_BUCKET"
+          
+          if ! aws s3api head-bucket --bucket "$S3_BUCKET" 2>/dev/null; then
+            echo "📦 Creating S3 bucket: $S3_BUCKET"
+            if [ "${{ env.AWS_REGION }}" = "us-east-1" ]; then
+              aws s3api create-bucket --bucket "$S3_BUCKET" || {
+                echo "⚠️ Could not create bucket, will use resolve_s3"
+                S3_BUCKET=""
+              }
+            else
+              aws s3api create-bucket \
+                --bucket "$S3_BUCKET" \
+                --create-bucket-configuration LocationConstraint=${{ env.AWS_REGION }} || {
+                echo "⚠️ Could not create bucket, will use resolve_s3"
+                S3_BUCKET=""
+              }
+            fi
+          else
+            echo "✅ S3 bucket already exists"
+          fi
           
           # Deploy each component that has a template
           for component_dir in components/*/; do
@@ -86,15 +118,39 @@ jobs:
               
               cd "$component_dir"
               
+              # Validate component stack name length
+              COMPONENT_STACK_NAME="${{ env.PR_STACK_NAME }}-${component_name}"
+              if [ ${#COMPONENT_STACK_NAME} -gt 128 ]; then
+                echo "❌ Component stack name too long: $COMPONENT_STACK_NAME"
+                DEPLOYMENT_SUCCESS=false
+                DEPLOYED_COMPONENTS="$DEPLOYED_COMPONENTS- ❌ $component_name (stack name too long)\n"
+                FAILED_COMPONENTS="$FAILED_COMPONENTS$component_name "
+                cd - > /dev/null
+                continue
+              fi
+              
               # Build the component
               if sam build; then
                 echo "✅ Build successful for $component_name"
                 
-                # Deploy with PR-specific stack name using guided approach
-                COMPONENT_STACK_NAME="${{ env.PR_STACK_NAME }}-${component_name}"
-                
                 # Create a temporary samconfig for this deployment
-                cat > samconfig-temp.toml << EOF
+                if [ -n "$S3_BUCKET" ]; then
+                  # Use explicit S3 bucket
+                  cat > samconfig-temp.toml << EOF
+version = 0.1
+[default.deploy.parameters]
+stack_name = "$COMPONENT_STACK_NAME"
+s3_bucket = "$S3_BUCKET"
+s3_prefix = "pr-${{ env.PR_NUMBER }}"
+region = "${{ env.AWS_REGION }}"
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "Environment=pr-${{ env.PR_NUMBER }}"
+confirm_changeset = false
+fail_on_empty_changeset = false
+EOF
+                else
+                  # Fallback to resolve_s3
+                  cat > samconfig-temp.toml << EOF
 version = 0.1
 [default.deploy.parameters]
 stack_name = "$COMPONENT_STACK_NAME"
@@ -105,43 +161,68 @@ parameter_overrides = "Environment=pr-${{ env.PR_NUMBER }}"
 confirm_changeset = false
 fail_on_empty_changeset = false
 EOF
-                
-                if sam deploy --config-file samconfig-temp.toml; then
-                  
-                  echo "✅ Deployment successful for $component_name"
-                  DEPLOYED_COMPONENTS="$DEPLOYED_COMPONENTS- ✅ $component_name\n"
-                  
-                  # Get stack outputs for URLs
-                  STACK_OUTPUTS=$(aws cloudformation describe-stacks \
-                    --stack-name "$COMPONENT_STACK_NAME" \
-                    --query 'Stacks[0].Outputs' \
-                    --output json 2>/dev/null || echo "[]")
-                  
-                  if [ "$STACK_OUTPUTS" != "[]" ]; then
-                    DEPLOYMENT_URLS="$DEPLOYMENT_URLS\n**$component_name Outputs:**\n"
-                    echo "$STACK_OUTPUTS" | jq -r '.[] | "- **\(.OutputKey)**: \(.OutputValue)"' >> /tmp/outputs.txt
-                    DEPLOYMENT_URLS="$DEPLOYMENT_URLS$(cat /tmp/outputs.txt)\n"
-                  fi
-                  
-                else
-                  echo "❌ Deployment failed for $component_name"
-                  DEPLOYMENT_SUCCESS=false
-                  DEPLOYED_COMPONENTS="$DEPLOYED_COMPONENTS- ❌ $component_name (deployment failed)\n"
                 fi
                 
-                # Clean up temporary config
-                rm -f samconfig-temp.toml
+                # Deploy with retry logic
+                DEPLOY_ATTEMPTS=0
+                MAX_ATTEMPTS=2
+                DEPLOY_SUCCESS=false
+                
+                while [ $DEPLOY_ATTEMPTS -lt $MAX_ATTEMPTS ] && [ "$DEPLOY_SUCCESS" = false ]; do
+                  DEPLOY_ATTEMPTS=$((DEPLOY_ATTEMPTS + 1))
+                  echo "🚀 Deployment attempt $DEPLOY_ATTEMPTS for $component_name"
+                  
+                  if sam deploy --config-file samconfig-temp.toml; then
+                    echo "✅ Deployment successful for $component_name"
+                    DEPLOYED_COMPONENTS="$DEPLOYED_COMPONENTS- ✅ $component_name\n"
+                    DEPLOY_SUCCESS=true
+                    
+                    # Get stack outputs for URLs
+                    STACK_OUTPUTS=$(aws cloudformation describe-stacks \
+                      --stack-name "$COMPONENT_STACK_NAME" \
+                      --query 'Stacks[0].Outputs' \
+                      --output json 2>/dev/null || echo "[]")
+                    
+                    if [ "$STACK_OUTPUTS" != "[]" ] && [ "$STACK_OUTPUTS" != "null" ]; then
+                      DEPLOYMENT_URLS="$DEPLOYMENT_URLS\n**$component_name Outputs:**\n"
+                      echo "$STACK_OUTPUTS" | jq -r '.[] | "- **\(.OutputKey)**: \(.OutputValue)"' >> /tmp/outputs-${component_name}.txt 2>/dev/null || echo "- Error parsing outputs" >> /tmp/outputs-${component_name}.txt
+                      DEPLOYMENT_URLS="$DEPLOYMENT_URLS$(cat /tmp/outputs-${component_name}.txt)\n"
+                      rm -f /tmp/outputs-${component_name}.txt
+                    fi
+                  else
+                    echo "❌ Deployment attempt $DEPLOY_ATTEMPTS failed for $component_name"
+                    if [ $DEPLOY_ATTEMPTS -eq $MAX_ATTEMPTS ]; then
+                      echo "❌ All deployment attempts failed for $component_name"
+                      DEPLOYMENT_SUCCESS=false
+                      DEPLOYED_COMPONENTS="$DEPLOYED_COMPONENTS- ❌ $component_name (deployment failed after $MAX_ATTEMPTS attempts)\n"
+                      FAILED_COMPONENTS="$FAILED_COMPONENTS$component_name "
+                    else
+                      echo "⏳ Waiting 30 seconds before retry..."
+                      sleep 30
+                    fi
+                  fi
+                done
               else
                 echo "❌ Build failed for $component_name"
                 DEPLOYMENT_SUCCESS=false
                 DEPLOYED_COMPONENTS="$DEPLOYED_COMPONENTS- ❌ $component_name (build failed)\n"
+                FAILED_COMPONENTS="$FAILED_COMPONENTS$component_name "
               fi
               
+              # Always clean up temporary config (success or failure)
+              rm -f samconfig-temp.toml
               cd - > /dev/null
             else
               echo "⏭️ Skipping $component_name (no template.yaml)"
             fi
           done
+          
+          # Summary
+          if [ "$DEPLOYMENT_SUCCESS" = true ]; then
+            echo "🎉 All components deployed successfully!"
+          else
+            echo "⚠️ Some components failed to deploy: $FAILED_COMPONENTS"
+          fi
           
           # Set outputs for next steps
           echo "deployment_success=$DEPLOYMENT_SUCCESS" >> $GITHUB_OUTPUT
